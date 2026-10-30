@@ -1,0 +1,19 @@
+[project]
+name = "hud-robot-interfaces"
+version = "0.1.0"
+description = "Robot envs and tasks driven through HUD robot control interfaces"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "hud[robot]",
+    "mujoco>=3.2",
+    "numpy>=1.26",
+]
+
+[tool.uv.sources]
+hud = { path = "../hud-python", editable = true }
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100

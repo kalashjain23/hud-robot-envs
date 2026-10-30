@@ -1,0 +1,43 @@
+<!-- A table in front of the Panda (base at the origin), two cubes and two plates. The bridge
+     lays them out per episode. -->
+<mujoco model="panda tabletop">
+  <include file="panda.xml"/>
+
+  <option timestep="0.002" cone="elliptic" impratio="10"/>
+
+  <visual>
+    <headlight ambient=".3 .3 .3" diffuse=".35 .35 .35" specular="0 0 0"/>
+    <global offwidth="256" offheight="256"/>
+    <quality shadowsize="4096"/>
+  </visual>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" rgb1=".62 .60 .56" rgb2=".54 .52 .48"
+             width="300" height="300"/>
+    <material name="table" texture="grid" texrepeat="8 8"/>
+    <texture type="skybox" builtin="gradient" rgb1=".55 .62 .70" rgb2=".20 .22 .26" width="512"
+             height="3072"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0.4 0 1.6" dir="0 0 -1" directional="true" diffuse=".5 .5 .5" specular="0 0 0"/>
+    <geom name="table" type="box" size=".6 .6 .02" pos=".35 0 -.02" material="table"/>
+    <body name="plate_green" pos=".6 .15 0">
+      <geom type="cylinder" size=".055 .005" pos="0 0 .005" rgba=".2 .7 .3 1"/>
+    </body>
+    <body name="plate_yellow" pos=".6 -.15 0">
+      <geom type="cylinder" size=".055 .005" pos="0 0 .005" rgba=".9 .75 .15 1"/>
+    </body>
+    <!-- On the top front-right edge of the workspace box, facing the robot and looking down. -->
+    <camera name="scene" pos="1.15 -0.5 0.85" xyaxes="0.581 0.814 0 -0.514 0.367 0.776" fovy="58"/>
+
+    <body name="cube_red" pos=".45 .1 .02">
+      <freejoint name="cube_red"/>
+      <geom type="box" size=".02 .02 .02" rgba=".85 .2 .2 1" mass=".05" friction="1.5 .02 .001"/>
+    </body>
+    <body name="cube_blue" pos=".45 -.1 .02">
+      <freejoint name="cube_blue"/>
+      <geom type="box" size=".02 .02 .02" rgba=".2 .35 .85 1" mass=".05" friction="1.5 .02 .001"/>
+    </body>
+  </worldbody>
+</mujoco>
