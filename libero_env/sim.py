@@ -14,6 +14,12 @@ What is LIBERO's, unchanged:
 - The ``agentview`` and ``robot0_eye_in_hand`` cameras at 256 px, and the episode protocol
   openpi evaluates with: 10 settling steps with the gripper open after each reset.
 
+A chain asks for several of a suite's tasks in one episode, for suites whose tasks share one
+scene (``libero_goal``): the episode starts from the first task's init state, the prompt
+lists every task in order, and it is graded with LIBERO's own goal predicates for each task,
+all checked on the live sim. Its score is the share of the tasks' goals that hold at the end;
+it succeeds (and ends) when all hold at once.
+
 What this file adds is the contract: the cameras' mounts (the wrist's as a live pose), and the
 proprio openpi feeds pi0 on LIBERO (fingertip position, axis-angle orientation, finger joints).
 Frames are flipped upright (robosuite renders bottom-up), so the published camera frames are
@@ -23,6 +29,7 @@ applies its own flip.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -54,6 +61,7 @@ import torch
 from hud.environment.robot import RobotBridge
 from libero.libero import benchmark, get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
+from libero.libero.envs.bddl_utils import robosuite_parse_problem
 from numpy.typing import NDArray
 
 CONTROL_RATE = 20
@@ -66,6 +74,9 @@ SETTLE_ACTION = [0.0] * 6 + [-1.0]
 STATE = ["eef.x", "eef.y", "eef.z", "eef.rx", "eef.ry", "eef.rz", "finger.left", "finger.right"]
 ACTION = ["eef.dx", "eef.dy", "eef.dz", "eef.drx", "eef.dry", "eef.drz", "gripper"]
 POSE = ["x", "y", "z", "qx", "qy", "qz", "qw"]
+HORIZON = 10_000
+#: What makes a BDDL problem's scene; chained tasks must agree on all of it.
+SCENE_KEYS = ("fixtures", "regions", "objects", "scene_properties", "initial_state")
 #: Max steps per episode in openpi's LIBERO eval, by suite.
 MAX_STEPS = {"libero_spatial": 220, "libero_object": 280, "libero_goal": 300, "libero_10": 520}
 
@@ -112,6 +123,12 @@ class Libero(RobotBridge):
         self.obs: dict[str, Any] = {}
         self.frames: list[NDArray[np.uint8]] = []
         self.ticks = 0
+        #: A chain's tasks and each one's goal predicates (empty: one task, LIBERO's own done).
+        self.chain: list[int] = []
+        self.goals: list[list[list[str]]] = []
+        #: A chain's goal changes, as (tick, task id, holds), for analysis after the episode.
+        self.goal_log: list[tuple[int, int, bool]] = []
+        self.held: list[bool] = []
         self.contract = self._contract()
 
     def _open(self, task_id: int) -> OffScreenRenderEnv:
@@ -119,9 +136,14 @@ class Libero(RobotBridge):
             if self.env is not None:
                 self.env.close()
             task = self.suite.get_task(task_id)
-            bddl = Path(get_libero_path("bddl_files")) / task.problem_folder / task.bddl_file
+            bddl = self._bddl(task)
+            # robosuite ends an episode at its horizon (LIBERO's default 1,000 steps) and then
+            # refuses actions; the env's time limit bounds episodes, so set it past any chain.
             self.env = OffScreenRenderEnv(
-                bddl_file_name=str(bddl), camera_heights=self.image, camera_widths=self.image
+                bddl_file_name=str(bddl),
+                camera_heights=self.image,
+                camera_widths=self.image,
+                horizon=HORIZON,
             )
             self.env.seed(0)
             self.task_id = task_id
@@ -192,7 +214,20 @@ class Libero(RobotBridge):
             },
         }
 
-    def reset(self, task_id: int = 0, init_state: int = 0) -> str:
+    def reset(self, task_id: int = 0, init_state: int = 0, chain: list[int] | None = None) -> str:
+        """One task (``task_id``), or a ``chain`` of the suite's tasks in one scene, started
+        from the first one's ``init_state``."""
+        self.chain = list(chain or [])
+        if self.chain:
+            task_id = self.chain[0]
+            problems = [
+                robosuite_parse_problem(str(self._bddl(self.suite.get_task(i)))) for i in self.chain
+            ]
+            if any(p[key] != problems[0][key] for p in problems for key in SCENE_KEYS):
+                raise ValueError(f"chain {self.chain}: the tasks do not share one scene")
+            self.goals = [p["goal_state"] for p in problems]
+        else:
+            self.goals = []
         env = self._open(task_id)
         task = self.suite.get_task(task_id)
         env.reset()
@@ -204,13 +239,36 @@ class Libero(RobotBridge):
         self.terminated = False
         self.frames.clear()
         self.ticks = 0
-        return str(task.language)
+        self.held = self.done()
+        self.goal_log = [(0, t, True) for t, h in zip(self.chain, self.held) if h]
+        if not self.chain:
+            return str(task.language)
+        steps = [str(self.suite.get_task(i).language) for i in self.chain]
+        text = ", ".join(steps[:-1]) + f", then {steps[-1]}"
+        return text[0].upper() + text[1:] + "."
+
+    def _bddl(self, task: Any) -> Path:
+        return Path(get_libero_path("bddl_files")) / task.problem_folder / task.bddl_file
+
+    def done(self) -> list[bool]:
+        """Whether each chained task's goal holds now."""
+        assert self.env is not None
+        domain = self.env.env
+        return [all(domain._eval_predicate(state) for state in goal) for goal in self.goals]
 
     def step(self, action: NDArray[Any]) -> None:
         assert self.env is not None
         self.obs, _, done, _ = self.env.step(np.asarray(action[0], dtype=np.float64).tolist())
         self.ticks += 1
-        self.success = bool(done)
+        if self.chain:
+            held = self.done()
+            self.goal_log += [
+                (self.ticks, task, now)
+                for task, now, before in zip(self.chain, held, self.held)
+                if now != before
+            ]
+            self.held = held
+        self.success = all(self.held) if self.chain else bool(done)
         self.terminated = self.success
 
     def get_observation(self) -> tuple[dict[str, NDArray[Any]], NDArray[Any]]:
@@ -237,9 +295,21 @@ class Libero(RobotBridge):
 
     def result(self) -> dict[str, Any]:
         if self.video and self.frames:
-            name = f"{self.suite_name}-task{self.task_id}-init{self.init_state}.mp4"
+            tasks = "-".join(map(str, self.chain)) if self.chain else str(self.task_id)
+            name = f"{self.suite_name}-task{tasks}-init{self.init_state}.mp4"
             self._write_video(Path(self.video) / name)
-        return super().result()
+            if self.chain:
+                log = [{"tick": k, "task": t, "holds": h} for k, t, h in self.goal_log]
+                (Path(self.video) / name).with_suffix(".goals.json").write_text(json.dumps(log))
+        result = super().result()
+        if self.chain:
+            done = self.done()
+            result |= {
+                "score": sum(done) / len(done),
+                "done": dict(zip(self.chain, done)),
+                "goal_log": self.goal_log,
+            }
+        return result
 
     def _write_video(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)

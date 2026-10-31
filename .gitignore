@@ -4,6 +4,7 @@ runs.log
 __pycache__/
 third_party/LIBERO/
 third_party/libero-venv/
+third_party/smolvla-venv/
 third_party/libero-config/
 .ruff_cache/
 progress.html
