@@ -1,7 +1,10 @@
 """The Franka tabletop: the MuJoCo sim behind a ``robot`` wire, plus a control interface for LLMs.
 
-``TABLETOP_INTERFACE`` picks how an LLM drives it: ``direct`` (one tool call per motion) or
-``code`` (programs over motion primitives, one ``run`` call each).
+``TABLETOP_INTERFACE`` picks how an LLM drives it: ``direct`` (one tool call per motion),
+``code`` (programs over motion primitives, one ``run`` call each) or ``supervise`` (SmolVLA
+fine-tuned on LIBERO acts, zero-shot, from the local server in
+``libero_env/smolvla_server.py``; the LLM instructs it and can take over with the motion tool;
+needs ``TABLETOP_CONTROL=delta``).
 
 ``TABLETOP_CONTROL`` picks the level the arm is driven at (``ee``, ``joint`` or ``delta``),
 which picks the contract and so the direct-control tool (``move_to``, ``move_joints``,
@@ -16,24 +19,27 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from hud import Environment
-from hud.environment.robot import CodeAsPolicy, DirectControl, RobotEndpoint
+from hud.agents.robot import RemoteModel
+from hud.environment.robot import CodeAsPolicy, DirectControl, PolicySupervision, RobotEndpoint
+
+from tabletop.policy import LiberoPolicyAdapter
 
 CONTROL = os.environ.get("TABLETOP_CONTROL", "ee")
 INTERFACE = os.environ.get("TABLETOP_INTERFACE", "direct")
-if INTERFACE not in ("direct", "code"):
-    raise ValueError(f"TABLETOP_INTERFACE must be direct or code, got {INTERFACE!r}")
+if INTERFACE not in ("direct", "code", "supervise"):
+    raise ValueError(f"TABLETOP_INTERFACE must be direct, code or supervise, got {INTERFACE!r}")
+if INTERFACE == "supervise" and CONTROL != "delta":
+    raise ValueError("TABLETOP_INTERFACE=supervise needs TABLETOP_CONTROL=delta")
+PORT = int(os.environ.get("TABLETOP_POLICY_PORT", "8000"))
 #: Where the sim writes one MP4 per graded episode (unset: no video).
 VIDEO = os.environ.get("TABLETOP_VIDEO", "")
 #: How camera mounts are published: live (default), static, or off (to benchmark them).
 GEOMETRY = os.environ.get("TABLETOP_GEOMETRY", "live")
 if GEOMETRY not in ("live", "static", "off"):
     raise ValueError(f"TABLETOP_GEOMETRY must be live, static or off, got {GEOMETRY!r}")
-#: The wrist camera mount: tilted (default, as on real arms) or down (along the fingers).
-WRIST = os.environ.get("TABLETOP_WRIST", "tilted")
-if WRIST not in ("tilted", "down"):
-    raise ValueError(f"TABLETOP_WRIST must be tilted or down, got {WRIST!r}")
 #: Camera image size in pixels (square).
 IMAGE = int(os.environ.get("TABLETOP_IMAGE", "256"))
 
@@ -79,21 +85,25 @@ sim = RobotEndpoint.spawn(
                 "control": CONTROL,
                 "video": VIDEO,
                 "geometry": GEOMETRY,
-                "wrist": WRIST,
                 "image": IMAGE,
             }
         ),
     ]
 )
 sim.attach(env)
-interface = DirectControl if INTERFACE == "direct" else CodeAsPolicy
-interface(
-    notes=f"{NOTES[CONTROL]} {SCENE}",
-    max_step={"gripper": 0.5},
+options: dict[str, Any] = {
+    "notes": f"{NOTES[CONTROL]} {SCENE}",
+    "max_step": {"gripper": 0.5},
     # The joint servos settle within a few mm of a pose; closer is not "stopped short".
-    tolerance={"position": 0.008},
-    time_limit=120,
-).attach(sim)
+    "tolerance": {"position": 0.008},
+    "time_limit": 120,
+}
+if INTERFACE == "supervise":
+    # 50 LIBERO steps per SmolVLA chunk are 25 tabletop ticks, all played as LeRobot plays them.
+    adapter = LiberoPolicyAdapter(chunk_size=25)
+    PolicySupervision(RemoteModel(port=PORT), adapter, use_motion=True, **options).attach(sim)
+else:
+    (DirectControl if INTERFACE == "direct" else CodeAsPolicy)(**options).attach(sim)
 
 
 @env.initialize

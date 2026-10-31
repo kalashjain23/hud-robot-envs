@@ -34,7 +34,6 @@ from numpy.typing import NDArray
 
 Control = Literal["ee", "joint", "delta"]
 Geometry = Literal["off", "static", "live"]
-Wrist = Literal["down", "tilted"]
 
 SCENE = Path(__file__).resolve().parents[1] / "assets" / "franka_emika_panda" / "tabletop.xml"
 CONTROL_RATE = 10
@@ -100,26 +99,19 @@ def prompt(task: Task, pairs: list[tuple[str, str]]) -> str:
     return f"{text}, then the {rest[0][0]} cube on the {rest[0][1]} plate." if rest else f"{text}."
 
 
-#: Wrist camera mounts on the hand (pos, quat wxyz); image up is hand +x in both.
-WRIST_MOUNTS: dict[Wrist, tuple[list[float], list[float]]] = {
-    # Beside the hand, looking straight along the fingers: a top-down view when the hand
-    # points down.
-    "down": ([0.07, 0.0, 0.0], [0.0, 0.7071068, 0.7071068, 0.0]),
-    # Off the side of the hand and tilted 40 degrees in, as wrist cameras are on real arms
-    # (DROID, LeRobot): the fingers and anything they hold sit at the bottom of the image, the
-    # workspace ahead above them. Looks at a point 5 cm past the fingertip.
-    "tilted": ([0.10, 0.0, 0.03], [0.2407, 0.6649, 0.6649, 0.2407]),
-}
+#: The wrist camera on the hand (pos, quat wxyz), LIBERO's (robosuite's Panda ``eye_in_hand``):
+#: 5 cm beside the hand, looking straight along the fingers, image up along hand +x.
+WRIST_MOUNT = ([0.05, 0.0, 0.0], [0.0, 0.7071068, 0.7071068, 0.0])
 
 
-def build_model(wrist: Wrist = "tilted", image: int = IMAGE) -> mujoco.MjModel:
+def build_model(image: int = IMAGE) -> mujoco.MjModel:
     """The scene, with a fingertip site and a wrist camera added to the hand, rendering
     *image*-pixel frames."""
     spec = mujoco.MjSpec.from_file(str(SCENE))
     spec.visual.global_.offwidth = spec.visual.global_.offheight = max(image, 640)
     hand = spec.body("hand")
     hand.add_site(name="tcp", pos=TCP, size=[0.004, 0, 0], rgba=[1, 1, 0, 0])
-    pos, quat = WRIST_MOUNTS[wrist]
+    pos, quat = WRIST_MOUNT
     hand.add_camera(name="wrist", pos=pos, fovy=75, quat=quat)
     # Menagerie's finger servo squeezes a 4 cm cube with ~2 N; 5x stiffer holds it like the
     # real hand (same 0..255 command, same open width).
@@ -242,7 +234,6 @@ class Franka(RobotBridge):
         control: Control = "ee",
         video: str = "",
         geometry: Geometry = "live",
-        wrist: Wrist = "tilted",
         image: int = IMAGE,
     ) -> None:
         super().__init__()
@@ -251,7 +242,7 @@ class Franka(RobotBridge):
         self.frames: list[NDArray[np.uint8]] = []
         self.ticks = 0
         self.seed = 0
-        self.model = build_model(wrist, image)
+        self.model = build_model(image)
         self.data = mujoco.MjData(self.model)
         self.scratch = mujoco.MjData(self.model)  # IK solves here, never stepped
         self.renderer = mujoco.Renderer(self.model, image, image)
