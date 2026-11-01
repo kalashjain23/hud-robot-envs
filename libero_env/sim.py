@@ -301,6 +301,8 @@ class Libero(RobotBridge):
             if self.chain:
                 log = [{"tick": k, "task": t, "holds": h} for k, t, h in self.goal_log]
                 (Path(self.video) / name).with_suffix(".goals.json").write_text(json.dumps(log))
+            grader = (Path(self.video) / name).with_suffix(".grader.json")
+            grader.write_text(json.dumps(self._grader_state()))
         result = super().result()
         if self.chain:
             done = self.done()
@@ -310,6 +312,28 @@ class Libero(RobotBridge):
                 "goal_log": self.goal_log,
             }
         return result
+
+    def _grader_state(self) -> list[dict[str, Any]]:
+        """Each goal predicate at the end, with the world pose of every object it names: why
+        LIBERO's check passed or failed."""
+        assert self.env is not None
+        domain = self.env.env
+        report = []
+        for task_id in self.chain or [self.task_id]:
+            bddl = self._bddl(self.suite.get_task(task_id))
+            for predicate in robosuite_parse_problem(str(bddl))["goal_state"]:
+                poses = {}
+                for name in predicate[1:]:
+                    state = domain.object_states_dict.get(name)
+                    if state is not None:
+                        geom = state.get_geom_state()
+                        poses[name] = {
+                            "pos": np.asarray(geom["pos"]).round(4).tolist(),
+                            "quat": np.asarray(geom["quat"]).round(4).tolist(),
+                        }
+                holds = bool(domain._eval_predicate(predicate))
+                report.append({"task": task_id, "predicate": predicate, "holds": holds, **poses})
+        return report
 
     def _write_video(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)

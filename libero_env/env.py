@@ -35,6 +35,8 @@ POLICY = os.environ.get("LIBERO_POLICY", "pi05")
 if POLICY not in ("pi05", "smolvla"):
     raise ValueError(f"LIBERO_POLICY must be pi05 or smolvla, got {POLICY!r}")
 PORT = int(os.environ.get("LIBERO_POLICY_PORT", "8000"))
+#: Whether the supervising model can take over with the motion tool (default: yes).
+TAKEOVER = os.environ.get("LIBERO_TAKEOVER", "1") == "1"
 VIDEO = os.environ.get("LIBERO_VIDEO", "")
 #: Camera frames' size in px. The policies take 256 (a larger render is averaged down for
 #: them), so a larger one only changes what the LLM sees.
@@ -89,7 +91,7 @@ if INTERFACE == "supervise":
     PolicySupervision(
         policy,
         adapter,
-        use_motion=True,
+        use_motion=TAKEOVER,
         home=home,
         notes=NOTES,
         instructions=INSTRUCTIONS,
