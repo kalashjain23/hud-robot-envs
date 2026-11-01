@@ -56,7 +56,7 @@ git clone --depth 1 https://github.com/Lifelong-Robot-Learning/LIBERO.git
 uv venv --python 3.11 libero-venv
 VIRTUAL_ENV=$PWD/libero-venv uv pip install robosuite==1.4.1 mujoco==3.2.7 bddl==1.0.1 \
     future gym==0.25.2 easydict termcolor pyyaml tqdm imageio matplotlib torch scipy \
-    "numpy<2" -e "../../hud-python[robot]"
+    "numpy<2" "hud[robot] @ git+https://github.com/kalashjain23/hud-python@feat/robot-control-interfaces"
 echo "$PWD/LIBERO" > libero-venv/lib/python3.11/site-packages/libero_src.pth
 ```
 

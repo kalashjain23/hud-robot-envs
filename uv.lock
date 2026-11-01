@@ -835,7 +835,8 @@ wheels = [
 
 [[package]]
 name = "hud"
-source = { editable = "../hud-python" }
+version = "0.6.21"
+source = { git = "https://github.com/kalashjain23/hud-python?branch=feat%2Frobot-control-interfaces#641fc61c373a919f6f22266778bcbd7cba3a9272" }
 dependencies = [
     { name = "anthropic" },
     { name = "asyncssh" },
@@ -867,52 +868,6 @@ robot = [
     { name = "openpi-client" },
 ]
 
-[package.metadata]
-requires-dist = [
-    { name = "anthropic", specifier = ">=2.1,<3" },
-    { name = "anthropic", extras = ["bedrock"], marker = "extra == 'bedrock'", specifier = ">=2.1,<3" },
-    { name = "asyncssh", specifier = ">=2.23.0" },
-    { name = "asyncvnc", specifier = ">=1.3.0" },
-    { name = "av", marker = "extra == 'dev'", specifier = ">=12" },
-    { name = "av", marker = "extra == 'robot'", specifier = ">=12" },
-    { name = "daytona", marker = "extra == 'daytona'", specifier = ">=0.100" },
-    { name = "dirty-equals", marker = "extra == 'dev'" },
-    { name = "dotenv", marker = "extra == 'dev'", specifier = ">=0.9.9" },
-    { name = "fastmcp", specifier = "==4.0.9" },
-    { name = "google-genai", specifier = ">=2.30.1" },
-    { name = "gymnasium", marker = "extra == 'dev'", specifier = ">=1.0" },
-    { name = "gymnasium", marker = "extra == 'robot'", specifier = ">=1.0" },
-    { name = "httpx", specifier = ">=0.23.0,<1" },
-    { name = "httpx2", specifier = ">=2.0.0,<3" },
-    { name = "mcp", specifier = ">=2.2.0,<3" },
-    { name = "modal", marker = "extra == 'modal'", specifier = ">=1.0" },
-    { name = "numpy", marker = "extra == 'dev'", specifier = ">=1.24" },
-    { name = "numpy", marker = "extra == 'robot'", specifier = ">=1.24" },
-    { name = "openai", specifier = ">=2.45.0" },
-    { name = "openpi-client", marker = "extra == 'dev'", specifier = ">=0.1.2" },
-    { name = "openpi-client", marker = "extra == 'robot'", specifier = ">=0.1.2" },
-    { name = "packaging", specifier = ">=21.0" },
-    { name = "pillow", specifier = ">=11.0.0" },
-    { name = "prompt-toolkit", specifier = "==3.0.51" },
-    { name = "pydantic", specifier = ">=2.10,<3" },
-    { name = "pydantic-settings", specifier = ">=2.2,<3" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.1.1" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'" },
-    { name = "pytest-cov", marker = "extra == 'dev'" },
-    { name = "pytest-mock", marker = "extra == 'dev'" },
-    { name = "pytest-timeout", marker = "extra == 'dev'" },
-    { name = "pytest-xdist", marker = "extra == 'dev'" },
-    { name = "python-dotenv", specifier = ">=1.0,<2" },
-    { name = "questionary", specifier = "==2.1.0" },
-    { name = "rich", specifier = ">=13.0.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.16.1" },
-    { name = "torch", marker = "extra == 'train'", specifier = ">=2" },
-    { name = "ty", marker = "extra == 'dev'", specifier = "==0.0.67" },
-    { name = "typer", specifier = ">=0.9.0" },
-    { name = "websockets", specifier = ">=15.0.1" },
-]
-provides-extras = ["agent", "agents", "bedrock", "daytona", "dev", "modal", "robot", "train"]
-
 [[package]]
 name = "hud-robot-interfaces"
 version = "0.1.0"
@@ -927,7 +882,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "dreamscale", specifier = "==0.1.0a262" },
-    { name = "hud", extras = ["robot"], editable = "../hud-python" },
+    { name = "hud", extras = ["robot"], git = "https://github.com/kalashjain23/hud-python?branch=feat%2Frobot-control-interfaces" },
     { name = "mujoco", specifier = ">=3.2" },
     { name = "numpy", specifier = ">=1.26" },
 ]

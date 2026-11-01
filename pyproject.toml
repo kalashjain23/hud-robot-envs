@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-hud = { path = "../hud-python", editable = true }
+hud = { git = "https://github.com/kalashjain23/hud-python", branch = "feat/robot-control-interfaces" }
 
 [tool.uv]
 package = false
