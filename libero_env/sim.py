@@ -29,8 +29,11 @@ applies its own flip.
 
 from __future__ import annotations
 
+import io
 import json
 import os
+import pickle
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +60,6 @@ os.environ["LIBERO_CONFIG_PATH"] = str(_CONFIG)
 import av
 import mujoco
 import numpy as np
-import torch
 from hud.environment.robot import RobotBridge
 from libero.libero import benchmark, get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
@@ -75,6 +77,10 @@ STATE = ["eef.x", "eef.y", "eef.z", "eef.rx", "eef.ry", "eef.rz", "finger.left",
 ACTION = ["eef.dx", "eef.dy", "eef.dz", "eef.drx", "eef.dry", "eef.drz", "gripper"]
 POSE = ["x", "y", "z", "qx", "qy", "qz", "qw"]
 HORIZON = 10_000
+#: LIBERO-PRO's perturbed files (``third_party/libero-pro``, from the ``zhouxueyang/LIBERO-Pro``
+#: dataset): ``swap`` moves objects to each other's places, ``task`` changes the goal and
+#: ``lan`` rewords the instruction. The last two carry their own instruction.
+PERTURBATIONS = ("swap", "task", "lan")
 #: What makes a BDDL problem's scene; chained tasks must agree on all of it.
 SCENE_KEYS = ("fixtures", "regions", "objects", "scene_properties", "initial_state")
 #: Max steps per episode in openpi's LIBERO eval, by suite.
@@ -98,12 +104,29 @@ def axis_angle(xyzw: NDArray[np.float64]) -> NDArray[np.float64]:
     return xyzw[:3] * 2.0 * np.arccos(w) / sine
 
 
-def _init_states(task: Any) -> NDArray[np.float64]:
-    path = Path(get_libero_path("init_states")) / task.problem_folder / task.init_states_file
-    # Plain numpy arrays pickled by torch; allow just the numpy types they need.
-    numpy_types = [np.core.multiarray._reconstruct, np.ndarray, np.dtype, type(np.dtype("f8"))]
-    with torch.serialization.safe_globals(numpy_types):
-        return np.asarray(torch.load(path))
+class _NumpyUnpickler(pickle.Unpickler):
+    """Plain numpy arrays only: the init files are torch archives around a pickled array, and
+    LIBERO-PRO's use pickle protocol 4, which torch's own safe loader rejects."""
+
+    ALLOWED = frozenset(
+        {
+            ("numpy.core.multiarray", "_reconstruct"),
+            ("numpy", "ndarray"),
+            ("numpy", "dtype"),
+            ("_codecs", "encode"),  # protocol 2's way of writing bytes
+        }
+    )
+
+    def find_class(self, module: str, name: str) -> Any:
+        if (module, name) not in self.ALLOWED:
+            raise pickle.UnpicklingError(f"{module}.{name} is not allowed in an init file")
+        return super().find_class(module, name)
+
+
+def _init_states(path: Path) -> NDArray[np.float64]:
+    with zipfile.ZipFile(path) as archive:
+        (name,) = (n for n in archive.namelist() if n.endswith("/data.pkl"))
+        return np.asarray(_NumpyUnpickler(io.BytesIO(archive.read(name))).load())
 
 
 class Libero(RobotBridge):
@@ -111,8 +134,13 @@ class Libero(RobotBridge):
     its fixed initial states. With ``video`` set to a directory, each episode's frames (both
     cameras side by side, one per step) are written there as an MP4 when it is graded."""
 
-    def __init__(self, suite: str = "libero_10", video: str = "", image: int = IMAGE) -> None:
+    def __init__(
+        self, suite: str = "libero_10", video: str = "", image: int = IMAGE, perturbation: str = ""
+    ) -> None:
         super().__init__()
+        if perturbation and perturbation not in PERTURBATIONS:
+            raise ValueError(f"perturbation must be one of {PERTURBATIONS}, got {perturbation!r}")
+        self.perturbation = perturbation
         self.suite = benchmark.get_benchmark_dict()[suite]()
         self.suite_name = suite
         self.video = video
@@ -143,6 +171,7 @@ class Libero(RobotBridge):
                 bddl_file_name=str(bddl),
                 camera_heights=self.image,
                 camera_widths=self.image,
+                camera_depths=True,
                 horizon=HORIZON,
             )
             self.env.seed(0)
@@ -185,17 +214,29 @@ class Libero(RobotBridge):
                 **image,
                 "transform": transform,
                 "intrinsics": intrinsics,
+                "depth": f"observation/{name}_depth",
             }
         live = {
             pose: {"role": "observation", "shape": [7], "dtype": "float32", "names": POSE}
             for feature in cameras.values()
             if (pose := feature["transform"].get("pose"))
         }
+        # Each camera's depth image: metres along its optical axis, aligned with its frame.
+        depths = {
+            feature["depth"]: {
+                "role": "observation",
+                "type": "depth",
+                "shape": [self.image, self.image],
+                "dtype": "float32",
+            }
+            for feature in cameras.values()
+        }
         return {
             "robot_type": "panda",
             "control_rate": CONTROL_RATE,
             "features": {
                 **cameras,
+                **depths,
                 **live,
                 "observation/state": {
                     "role": "observation",
@@ -231,7 +272,7 @@ class Libero(RobotBridge):
         env = self._open(task_id)
         task = self.suite.get_task(task_id)
         env.reset()
-        self.obs = env.set_init_state(_init_states(task)[init_state])
+        self.obs = env.set_init_state(_init_states(self._files("init_states", task))[init_state])
         for _ in range(SETTLE_STEPS):
             self.obs, _, _, _ = env.step(SETTLE_ACTION)
         self.init_state = init_state
@@ -242,13 +283,31 @@ class Libero(RobotBridge):
         self.held = self.done()
         self.goal_log = [(0, t, True) for t, h in zip(self.chain, self.held) if h]
         if not self.chain:
+            if self.perturbation in ("task", "lan"):
+                words = robosuite_parse_problem(str(self._bddl(task)))["language_instruction"]
+                return " ".join(words)
             return str(task.language)
         steps = [str(self.suite.get_task(i).language) for i in self.chain]
         text = ", ".join(steps[:-1]) + f", then {steps[-1]}"
         return text[0].upper() + text[1:] + "."
 
     def _bddl(self, task: Any) -> Path:
-        return Path(get_libero_path("bddl_files")) / task.problem_folder / task.bddl_file
+        return self._files("bddl_files", task)
+
+    def _files(self, kind: str, task: Any) -> Path:
+        """A task's BDDL (``bddl_files``) or initial states (``init_states``): LIBERO's own, or
+        LIBERO-PRO's under the perturbation."""
+        name = task.bddl_file if kind == "bddl_files" else task.init_states_file
+        if self.perturbation:
+            folder = "bddl_files" if kind == "bddl_files" else "init_files"
+            return (
+                THIRD_PARTY
+                / "libero-pro"
+                / folder
+                / f"{task.problem_folder}_{self.perturbation}"
+                / name
+            )
+        return Path(get_libero_path(kind)) / task.problem_folder / name
 
     def done(self) -> list[bool]:
         """Whether each chained task's goal holds now."""
@@ -271,11 +330,21 @@ class Libero(RobotBridge):
         self.success = all(self.held) if self.chain else bool(done)
         self.terminated = self.success
 
+    def _metres(self, depth: NDArray[np.float32]) -> NDArray[np.float32]:
+        """MuJoCo's normalised depth buffer as metres along the optical axis (robosuite's
+        ``get_real_depth_map``, which needs h5py to import)."""
+        extent = self.model.stat.extent
+        near = self.model.vis.map.znear * extent
+        far = self.model.vis.map.zfar * extent
+        return (near / (1 - depth * (1 - near / far))).astype(np.float32)
+
     def get_observation(self) -> tuple[dict[str, NDArray[Any]], NDArray[Any]]:
         obs = self.obs
         data: dict[str, NDArray[Any]] = {}
         for name, camera in CAMERAS.items():
             data[f"observation/{name}"] = np.ascontiguousarray(obs[f"{camera}_image"][::-1])[None]
+            depth = self._metres(obs[f"{camera}_depth"][::-1, :, 0])
+            data[f"observation/{name}_depth"] = np.ascontiguousarray(depth)[None]
             if f"observation/{name}_pose" in self.contract["features"]:
                 view = self.model.camera(camera).id
                 pose = [

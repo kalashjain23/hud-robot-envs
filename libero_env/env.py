@@ -4,8 +4,8 @@ for LLMs.
 The sim runs in LIBERO's own venv (``third_party/libero-venv``, see the README);
 this module runs in the repo's. ``LIBERO_INTERFACE`` picks how an LLM drives it: ``direct``
 (one tool call per motion), ``code`` (programs over motion primitives) or ``supervise``
-(a VLA fine-tuned on LIBERO acts 2 s per call; the LLM instructs it, can send the arm
-home, ``libero_env/home.py``, and can take over with the motion tool, then hand back).
+(a VLA fine-tuned on LIBERO acts in parallel with the LLM, which instructs it, stops it, and
+can take over: the motion tool, ``home`` and ``reach`` from ``libero_env/home.py``).
 ``LIBERO_POLICY`` picks the VLA: ``pi05`` (Dreamscale) or ``smolvla`` (the local server in
 ``libero_env/smolvla_server.py``, on ``LIBERO_POLICY_PORT``). The action is LIBERO's
 end-effector delta, so the motion tool is ``move_by``. ``LIBERO_VIDEO`` names a directory for
@@ -17,13 +17,15 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 from hud import Environment
 from hud.agents.robot import RemoteModel
 from hud.environment.robot import CodeAsPolicy, DirectControl, PolicySupervision, RobotEndpoint
 
-from libero_env.home import home
+from libero_env.home import home, reach
 from libero_env.policy import DreamscaleModel, Pi05LiberoAdapter, SmolVLALiberoAdapter
+from perception.detect import make_detect
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = ROOT / "third_party" / "libero-venv" / "bin" / "python"
@@ -38,6 +40,8 @@ PORT = int(os.environ.get("LIBERO_POLICY_PORT", "8000"))
 #: Whether the supervising model can take over with the motion tool (default: yes).
 TAKEOVER = os.environ.get("LIBERO_TAKEOVER", "1") == "1"
 VIDEO = os.environ.get("LIBERO_VIDEO", "")
+#: A LIBERO-PRO perturbation of the suite's tasks (``swap``, ``task`` or ``lan``; unset: none).
+PERTURBATION = os.environ.get("LIBERO_PERTURBATION", "")
 #: Camera frames' size in px. The policies take 256 (a larger render is averaged down for
 #: them), so a larger one only changes what the LLM sees.
 IMAGE = int(os.environ.get("LIBERO_IMAGE", "256"))
@@ -49,6 +53,14 @@ INSTRUCTIONS = sorted(
 )
 #: Tasks per episode: 1, or a chain's length (``libero_chain``); the time limit scales with it.
 TASKS_PER_EPISODE = int(os.environ.get("LIBERO_TASKS_PER_EPISODE", "1"))
+#: Code as Policy: a file of Python loaded into every program (unset: none), and whether
+#: programs get SmolVLA (``LIBERO_POLICY_PORT``) as ``run_policy``. Never Dreamscale.
+MEMORY = os.environ.get("LIBERO_MEMORY", "")
+CAP_POLICY = os.environ.get("LIBERO_CAP_POLICY", "") == "1"
+#: Whether Code as Policy programs and Policy Supervision get ``detect`` (the detector server,
+#: ``perception/detector_server.py``, on ``LIBERO_DETECT_PORT``).
+DETECT = os.environ.get("LIBERO_DETECT", "") == "1"
+DETECT_PORT = int(os.environ.get("LIBERO_DETECT_PORT", "8002"))
 #: openpi's LIBERO eval budget per suite, in 20 Hz steps.
 MAX_STEPS = {"libero_spatial": 220, "libero_object": 280, "libero_goal": 300, "libero_10": 520}
 
@@ -73,7 +85,7 @@ sim = RobotEndpoint.spawn(
         "hud.environment.robot.bridge",
         f"{Path(__file__).with_name('sim.py')}:Libero",
         "--init",
-        json.dumps({"suite": SUITE, "video": VIDEO, "image": IMAGE}),
+        json.dumps({"suite": SUITE, "video": VIDEO, "image": IMAGE, "perturbation": PERTURBATION}),
     ]
 )
 sim.attach(env)
@@ -91,15 +103,28 @@ if INTERFACE == "supervise":
     PolicySupervision(
         policy,
         adapter,
+        detector=make_detect(DETECT_PORT) if DETECT else None,
         use_motion=TAKEOVER,
         home=home,
+        reach=reach,
         notes=NOTES,
         instructions=INSTRUCTIONS,
         time_limit=time_limit,
     ).attach(sim)
+elif INTERFACE == "code":
+    extras: dict[str, Any] = {"memory": Path(MEMORY).read_text() if MEMORY else ""}
+    if DETECT:
+        extras["primitives"] = {"detect": make_detect(DETECT_PORT)}
+    notes = NOTES
+    if CAP_POLICY:
+        extras |= {"model": RemoteModel(port=PORT), "adapter": SmolVLALiberoAdapter(chunk_size=50)}
+        notes += " The learned policy was trained on exactly these instructions: " + "; ".join(
+            INSTRUCTIONS
+        )
+        notes += " If you think the scene is perturbed, do the task yourself, not with the policy."
+    CodeAsPolicy(notes=notes, time_limit=time_limit, **extras).attach(sim)
 else:
-    interface = DirectControl if INTERFACE == "direct" else CodeAsPolicy
-    interface(notes=NOTES, time_limit=time_limit).attach(sim)
+    DirectControl(notes=NOTES, time_limit=time_limit).attach(sim)
 
 
 @env.initialize

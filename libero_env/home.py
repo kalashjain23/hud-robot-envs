@@ -1,4 +1,5 @@
-"""LIBERO's home pose and a closed-loop controller that drives the arm back to it.
+"""LIBERO's home pose and closed-loop controllers that drive the arm back to it, or the
+fingertips to any point (``reach``).
 
 Every LIBERO-Goal episode starts with the fingertips at about (-0.21, 0.00, 1.17) m, pointing
 straight down, gripper open (measured over 8 tasks x 3 init states: within 2 cm and 0.01 rad;
@@ -61,3 +62,31 @@ def home(obs: dict[str, Any]) -> tuple[NDArray[np.float64], None, set[str]]:
     step = position * min(1.0, STEP / max(float(np.linalg.norm(position)), 1e-9))
     turn = rotation * min(1.0, TURN / max(float(np.linalg.norm(rotation)), 1e-9))
     return np.r_[step / METRES, turn / RADIANS, -1.0][None], None, set()
+
+
+#: A reach that has not got this much closer in ``STALL_TICKS`` ticks is stuck and stops.
+PROGRESS, STALL_TICKS = 0.002, 10
+
+
+def reach(target: NDArray[np.float64]) -> Any:
+    """A motion planner for the fingertips to the world point *target* (m): the next delta
+    action toward it along a straight line, orientation and grip held, none once it is there or
+    has stopped getting closer (blocked by a fixture, an object or the arm's own reach)."""
+    best = np.inf
+    since = 0
+
+    def plan(obs: dict[str, Any]) -> tuple[NDArray[np.float64], None, set[str]]:
+        nonlocal best, since
+        state = np.asarray(obs["data"]["observation/state"], dtype=np.float64)
+        position = np.asarray(target, dtype=np.float64) - state[:3]
+        distance = float(np.linalg.norm(position))
+        if distance < best - PROGRESS:
+            best, since = distance, 0
+        else:
+            since += 1
+        if distance < POS_TOL or since >= STALL_TICKS:
+            return np.zeros((0, 7)), None, set()
+        step = position * min(1.0, STEP / distance)
+        return np.r_[step / METRES, np.zeros(3), 0.0][None], None, set()
+
+    return plan

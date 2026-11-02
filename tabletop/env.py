@@ -25,6 +25,7 @@ from hud import Environment
 from hud.agents.robot import RemoteModel
 from hud.environment.robot import CodeAsPolicy, DirectControl, PolicySupervision, RobotEndpoint
 
+from perception.detect import make_detect
 from tabletop.policy import LiberoPolicyAdapter
 
 CONTROL = os.environ.get("TABLETOP_CONTROL", "ee")
@@ -42,6 +43,18 @@ if GEOMETRY not in ("live", "static", "off"):
     raise ValueError(f"TABLETOP_GEOMETRY must be live, static or off, got {GEOMETRY!r}")
 #: Camera image size in pixels (square).
 IMAGE = int(os.environ.get("TABLETOP_IMAGE", "256"))
+#: Code as Policy: a file of Python loaded into every program (unset: none), and whether
+#: programs get the fine-tuned SmolVLA as ``run_policy`` (needs ``TABLETOP_CONTROL=delta``).
+MEMORY = os.environ.get("TABLETOP_MEMORY", "")
+CAP_POLICY = os.environ.get("TABLETOP_CAP_POLICY", "") == "1"
+#: Code as Policy: whether programs get ``detect`` (Grounding DINO, ``perception/detector_server.py``
+#: on ``TABLETOP_DETECT_PORT``).
+DETECT = os.environ.get("TABLETOP_DETECT", "") == "1"
+DETECT_PORT = int(os.environ.get("TABLETOP_DETECT_PORT", "8002"))
+if CAP_POLICY and (INTERFACE != "code" or CONTROL != "delta"):
+    raise ValueError(
+        "TABLETOP_CAP_POLICY=1 needs TABLETOP_INTERFACE=code and TABLETOP_CONTROL=delta"
+    )
 
 SCENE = (
     "World frame in metres: the robot base is at the origin, the table top is z = 0, +x points "
@@ -101,9 +114,24 @@ options: dict[str, Any] = {
 if INTERFACE == "supervise":
     # 50 LIBERO steps per SmolVLA chunk are 25 tabletop ticks, all played as LeRobot plays them.
     adapter = LiberoPolicyAdapter(chunk_size=25)
-    PolicySupervision(RemoteModel(port=PORT), adapter, use_motion=True, **options).attach(sim)
+    detector = make_detect(DETECT_PORT) if DETECT else None
+    PolicySupervision(
+        RemoteModel(port=PORT), adapter, detector=detector, use_motion=True, **options
+    ).attach(sim)
+elif INTERFACE == "code":
+    extras: dict[str, Any] = {"memory": Path(MEMORY).read_text() if MEMORY else ""}
+    if DETECT:
+        extras["primitives"] = {"detect": make_detect(DETECT_PORT)}
+    if CAP_POLICY:
+        extras |= {"model": RemoteModel(port=PORT), "adapter": LiberoPolicyAdapter(chunk_size=25)}
+        options["notes"] += (
+            " The learned policy was trained on instructions worded like the task: 'Pick up "
+            "the <colour> cube and lift it at least 10 cm above the table.' and 'Put the "
+            "<colour> cube on the <colour> plate.'"
+        )
+    CodeAsPolicy(**options, **extras).attach(sim)
 else:
-    (DirectControl if INTERFACE == "direct" else CodeAsPolicy)(**options).attach(sim)
+    DirectControl(**options).attach(sim)
 
 
 @env.initialize

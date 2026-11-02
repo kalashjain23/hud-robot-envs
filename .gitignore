@@ -8,3 +8,4 @@ third_party/smolvla-venv/
 third_party/libero-config/
 .ruff_cache/
 progress.html
+third_party/libero-pro/
