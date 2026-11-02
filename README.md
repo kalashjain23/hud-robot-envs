@@ -43,7 +43,7 @@ Environment variables, `TABLETOP_` or `LIBERO_` prefixed:
 | `IMAGE` | `256` | Camera frame size, px |
 | `POLICY_PORT` | `8000` | SmolVLA server |
 | `DETECT`, `DETECT_PORT` | off, `8002` | `1` gives `code` and `supervise` a `detect` tool through the detector server |
-| `MEMORY` | none | `code`: a Python file loaded into every program |
+| `MEMORY` | none | `code`: a Python file loaded into every program, e.g. `libero_env/memory.py` or `tabletop/memory.py` (skills from solved episodes) |
 | `CAP_POLICY` | off | `code`: `1` adds a `run_policy` primitive (SmolVLA) |
 | `LIBERO_POLICY` | `pi05` | `supervise`: `pi05` (Dreamscale) or `smolvla` (local) |
 | `LIBERO_TAKEOVER` | `1` | `supervise`: serve the motion tool for taking over |
