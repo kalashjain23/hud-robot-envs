@@ -1,4 +1,4 @@
-# hud-robot-interfaces
+# hud-robot-envs
 
 Robot envs and tasks for HUD's three robot control interfaces. The interfaces live in the SDK
 (`hud.environment.robot`); this repo only declares envs and tasks.

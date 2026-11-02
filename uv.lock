@@ -869,7 +869,7 @@ robot = [
 ]
 
 [[package]]
-name = "hud-robot-interfaces"
+name = "hud-robot-envs"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
