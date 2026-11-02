@@ -18,11 +18,11 @@ def make_detect(port: int) -> Callable[..., list[dict[str, Any]]]:
 
     def detect(image: Any, prompt: str, threshold: float = 0.3) -> list[dict[str, Any]]:
         """detect(image, prompt, threshold=0.3) -> list of detections, best first: find what
-        *prompt* names (e.g. "red cube", "plate") in an (H, W, 3) image such as
-        observe().images["scene"]. Each detection is a dict: "label", "score" (0-1), "box"
+        *prompt* names (e.g. "red cube", "plate") in an (H, W, 3) image such as one of
+        observe().images. Each detection is a dict: "label", "score" (0-1), "box"
         (u0, v0, u1, v1) in pixels and "center" (u, v), pixels as (column, row) from the
         top-left. Turn a pixel into metres with the same observation's camera:
-        obs.cameras["scene"].point(u, v) with depth, else .to_world(u, v, z)."""
+        obs.cameras[camera].point(u, v) with depth, else .to_world(u, v, z)."""
         buffer = io.BytesIO()
         Image.fromarray(np.asarray(image, dtype=np.uint8)).save(buffer, format="PNG")
         request = json.dumps(

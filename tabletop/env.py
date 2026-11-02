@@ -35,6 +35,8 @@ if INTERFACE not in ("direct", "code", "supervise"):
 if INTERFACE == "supervise" and CONTROL != "delta":
     raise ValueError("TABLETOP_INTERFACE=supervise needs TABLETOP_CONTROL=delta")
 PORT = int(os.environ.get("TABLETOP_POLICY_PORT", "8000"))
+#: Whether the supervising model can take over with the motion tool (default: yes).
+TAKEOVER = os.environ.get("TABLETOP_TAKEOVER", "1") == "1"
 #: Where the sim writes one MP4 per graded episode (unset: no video).
 VIDEO = os.environ.get("TABLETOP_VIDEO", "")
 #: How camera mounts are published: live (default), static, or off (to benchmark them).
@@ -47,8 +49,8 @@ IMAGE = int(os.environ.get("TABLETOP_IMAGE", "256"))
 #: programs get the fine-tuned SmolVLA as ``run_policy`` (needs ``TABLETOP_CONTROL=delta``).
 MEMORY = os.environ.get("TABLETOP_MEMORY", "")
 CAP_POLICY = os.environ.get("TABLETOP_CAP_POLICY", "") == "1"
-#: Code as Policy: whether programs get ``detect`` (Grounding DINO, ``perception/detector_server.py``
-#: on ``TABLETOP_DETECT_PORT``).
+#: Whether Code as Policy programs and Policy Supervision get ``detect`` (Grounding DINO,
+#: ``perception/detector_server.py`` on ``TABLETOP_DETECT_PORT``).
 DETECT = os.environ.get("TABLETOP_DETECT", "") == "1"
 DETECT_PORT = int(os.environ.get("TABLETOP_DETECT_PORT", "8002"))
 if CAP_POLICY and (INTERFACE != "code" or CONTROL != "delta"):
@@ -116,7 +118,7 @@ if INTERFACE == "supervise":
     adapter = LiberoPolicyAdapter(chunk_size=25)
     detector = make_detect(DETECT_PORT) if DETECT else None
     PolicySupervision(
-        RemoteModel(port=PORT), adapter, detector=detector, use_motion=True, **options
+        RemoteModel(port=PORT), adapter, detector=detector, use_motion=TAKEOVER, **options
     ).attach(sim)
 elif INTERFACE == "code":
     extras: dict[str, Any] = {"memory": Path(MEMORY).read_text() if MEMORY else ""}

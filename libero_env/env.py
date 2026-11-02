@@ -24,7 +24,12 @@ from hud.agents.robot import RemoteModel
 from hud.environment.robot import CodeAsPolicy, DirectControl, PolicySupervision, RobotEndpoint
 
 from libero_env.home import home, reach
-from libero_env.policy import DreamscaleModel, Pi05LiberoAdapter, SmolVLALiberoAdapter
+from libero_env.policy import (
+    POLICY_IMAGE,
+    DreamscaleModel,
+    Pi05LiberoAdapter,
+    SmolVLALiberoAdapter,
+)
 from perception.detect import make_detect
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,7 +42,8 @@ POLICY = os.environ.get("LIBERO_POLICY", "pi05")
 if POLICY not in ("pi05", "smolvla"):
     raise ValueError(f"LIBERO_POLICY must be pi05 or smolvla, got {POLICY!r}")
 PORT = int(os.environ.get("LIBERO_POLICY_PORT", "8000"))
-#: Whether the supervising model can take over with the motion tool (default: yes).
+#: Whether the supervising model can move the arm itself: the motion tool, ``home`` and
+#: ``reach`` (default: yes).
 TAKEOVER = os.environ.get("LIBERO_TAKEOVER", "1") == "1"
 VIDEO = os.environ.get("LIBERO_VIDEO", "")
 #: A LIBERO-PRO perturbation of the suite's tasks (``swap``, ``task`` or ``lan``; unset: none).
@@ -61,6 +67,12 @@ CAP_POLICY = os.environ.get("LIBERO_CAP_POLICY", "") == "1"
 #: ``perception/detector_server.py``, on ``LIBERO_DETECT_PORT``).
 DETECT = os.environ.get("LIBERO_DETECT", "") == "1"
 DETECT_PORT = int(os.environ.get("LIBERO_DETECT_PORT", "8002"))
+if CAP_POLICY and INTERFACE != "code":
+    raise ValueError("LIBERO_CAP_POLICY=1 needs LIBERO_INTERFACE=code")
+if (INTERFACE == "supervise" or CAP_POLICY) and IMAGE % POLICY_IMAGE:
+    raise ValueError(
+        f"LIBERO_IMAGE must be a multiple of {POLICY_IMAGE} for the policy, got {IMAGE}"
+    )
 #: openpi's LIBERO eval budget per suite, in 20 Hz steps.
 MAX_STEPS = {"libero_spatial": 220, "libero_object": 280, "libero_goal": 300, "libero_10": 520}
 
@@ -74,7 +86,8 @@ NOTES = (
     "position: grip +1 closes, -1 opens, 0 holds, and the fingers take about 8 steps to go "
     "from open to closed. State: eef.x, eef.y, eef.z are the point between the fingertips in "
     "metres in the world frame, eef.rx, eef.ry, eef.rz its orientation as axis-angle, and "
-    "finger.left, finger.right each finger's opening (about 0.04 m open, 0 closed)."
+    "finger.left, finger.right each finger's joint position: left about +0.04 m open, right "
+    "about -0.04 m open, both 0 closed."
 )
 
 env = Environment(name="libero")
@@ -89,14 +102,15 @@ sim = RobotEndpoint.spawn(
     ]
 )
 sim.attach(env)
-dreamscale = DreamscaleModel()
+dreamscale = DreamscaleModel() if INTERFACE == "supervise" and POLICY == "pi05" else None
 #: Sim seconds per task (default: openpi's budget for the suite).
-TASK_SECONDS = float(os.environ.get("LIBERO_TASK_SECONDS", MAX_STEPS[SUITE] / 20))
+TASK_SECONDS = float(os.environ.get("LIBERO_TASK_SECONDS") or MAX_STEPS[SUITE] / 20)
 time_limit = TASK_SECONDS * TASKS_PER_EPISODE
 if INTERFACE == "supervise":
     # Actions played per chunk before the policy is queried again, as each is evaluated:
     # openpi replans pi0.5 every 5, LeRobot plays SmolVLA's whole 50-action chunk.
     if POLICY == "pi05":
+        assert dreamscale is not None
         policy, adapter = dreamscale, Pi05LiberoAdapter(chunk_size=5)
     else:
         policy, adapter = RemoteModel(port=PORT), SmolVLALiberoAdapter(chunk_size=50)
@@ -105,8 +119,9 @@ if INTERFACE == "supervise":
         adapter,
         detector=make_detect(DETECT_PORT) if DETECT else None,
         use_motion=TAKEOVER,
-        home=home,
-        reach=reach,
+        # Home is LIBERO-Goal's measured start pose; other suites start elsewhere.
+        home=home if TAKEOVER and SUITE == "libero_goal" else None,
+        reach=reach if TAKEOVER else None,
         notes=NOTES,
         instructions=INSTRUCTIONS,
         time_limit=time_limit,
@@ -136,7 +151,8 @@ async def up() -> None:
 
 @env.shutdown
 async def down() -> None:
-    dreamscale.close()
+    if dreamscale is not None:
+        dreamscale.close()
     await sim.stop()
 
 

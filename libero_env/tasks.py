@@ -1,6 +1,6 @@
 """LIBERO-Goal tasks. ``env`` is re-exported so ``hud eval libero_env/tasks.py`` serves it.
 
-The long-horizon chains are in ``goal_chains.py``: they need ``LIBERO_TASKS_PER_EPISODE=5``.
+The long-horizon chains are in ``goal_chains.py``, which sets ``LIBERO_TASKS_PER_EPISODE=5``.
 """
 
 from __future__ import annotations

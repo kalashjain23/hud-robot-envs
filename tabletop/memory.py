@@ -38,13 +38,13 @@ def open_gripper():
     wait(1.0)
 
 
-def grasp(x, y):
+def grasp(x, y, lower=0.0):
     """Pick up the cube centred at world (x, y): hover, descend, close, lift to carry height.
     Returns True if the cube is held."""
     open_gripper()
     go(z=HOVER)
     go(x, y, HOVER)
-    go(z=GRASP)
+    go(z=GRASP - lower)
     close_gripper()
     go(z=CARRY)
     return fingertip()[3] < 0.6
@@ -64,10 +64,4 @@ def regrasp(x, y, lower=0.006):
     reading near +1), usually because it closed above the cube or beside it. When: right after
     a failed grasp, once you have re-estimated the cube's centre from a fresh look. Fix: reopen,
     re-centre over (x, y) and close a few mm lower. Returns True if the cube is now held."""
-    open_gripper()
-    go(z=HOVER)
-    go(x, y, HOVER)
-    go(z=GRASP - lower)
-    close_gripper()
-    go(z=CARRY)
-    return fingertip()[3] < 0.6
+    return grasp(x, y, lower)

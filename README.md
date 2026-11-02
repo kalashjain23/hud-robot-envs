@@ -39,14 +39,14 @@ Environment variables, `TABLETOP_` or `LIBERO_` prefixed:
 | Variable | Default | Effect |
 |----------|---------|--------|
 | `INTERFACE` | `direct` | `direct`, `code` or `supervise` |
-| `VIDEO` | none | Directory for one MP4 per graded episode |
+| `VIDEO` | none | Directory for one MP4 per graded episode (LIBERO also writes the grader state, and a chain's goal log, beside it), named by task and seed: use one directory per run |
 | `IMAGE` | `256` | Camera frame size, px |
 | `POLICY_PORT` | `8000` | SmolVLA server |
 | `DETECT`, `DETECT_PORT` | off, `8002` | `1` gives `code` and `supervise` a `detect` tool through the detector server |
 | `MEMORY` | none | `code`: a Python file loaded into every program, e.g. `libero_env/memory.py` or `tabletop/memory.py` (skills from solved episodes) |
 | `CAP_POLICY` | off | `code`: `1` adds a `run_policy` primitive (SmolVLA) |
 | `LIBERO_POLICY` | `pi05` | `supervise`: `pi05` (Dreamscale) or `smolvla` (local) |
-| `LIBERO_TAKEOVER` | `1` | `supervise`: serve the motion tool for taking over |
+| `TAKEOVER` | `1` | `supervise`: `0` leaves the model language only (no motion tool; on LIBERO, no `home` or `reach`) |
 | `LIBERO_SUITE` | `libero_goal` in the task files | LIBERO suite |
 | `LIBERO_PERTURBATION` | none | LIBERO-PRO: `swap` (objects swapped), `task` (new goal) or `lan` (reworded) |
 | `LIBERO_TASK_SECONDS` | openpi's budget | Sim seconds per task |

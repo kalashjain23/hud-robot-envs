@@ -5,7 +5,7 @@ and ``np`` are already in scope."""
 
 def state():
     """The arm's state: eef.x/y/z (m, world), eef.rx/ry/rz (axis-angle), finger.left/right
-    (m of opening, about 0.04 open, 0 closed)."""
+    (m; left about +0.04 open, right about -0.04 open, both 0 closed)."""
     return observe().state["state"]
 
 
@@ -29,7 +29,7 @@ def close_gripper(steps=12):
     for _ in range(steps):
         move_by(grip=1)
     s = state()
-    return s["finger.left"] + s["finger.right"] > 0.004
+    return s["finger.left"] - s["finger.right"] > 0.004
 
 
 def open_gripper(steps=10):

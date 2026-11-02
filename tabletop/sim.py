@@ -398,6 +398,8 @@ class Franka(RobotBridge):
             self._write_video(Path(self.video) / f"{self.task}-seed{self.seed}.mp4")
         # Placing tasks earn a share per pair placed; lift is all or nothing.
         score = self._placed() / len(self.layout.pairs) if self.task != "lift" else 0.0
+        if not self.success:  # every cube on its plate but one still in hand: not all placed
+            score = min(score, 1 - 1 / len(self.layout.pairs))
         return {**super().result(), "score": 1.0 if self.success else score}
 
     def _write_video(self, path: Path) -> None:

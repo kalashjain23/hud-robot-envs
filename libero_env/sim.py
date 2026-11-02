@@ -83,8 +83,6 @@ HORIZON = 10_000
 PERTURBATIONS = ("swap", "task", "lan")
 #: What makes a BDDL problem's scene; chained tasks must agree on all of it.
 SCENE_KEYS = ("fixtures", "regions", "objects", "scene_properties", "initial_state")
-#: Max steps per episode in openpi's LIBERO eval, by suite.
-MAX_STEPS = {"libero_spatial": 220, "libero_object": 280, "libero_goal": 300, "libero_10": 520}
 
 
 def optical_xyzw(rotation: NDArray[np.float64]) -> list[float]:
@@ -283,13 +281,16 @@ class Libero(RobotBridge):
         self.held = self.done()
         self.goal_log = [(0, t, True) for t, h in zip(self.chain, self.held) if h]
         if not self.chain:
-            if self.perturbation in ("task", "lan"):
-                words = robosuite_parse_problem(str(self._bddl(task)))["language_instruction"]
-                return " ".join(words)
-            return str(task.language)
-        steps = [str(self.suite.get_task(i).language) for i in self.chain]
+            return self._instruction(task)
+        steps = [self._instruction(self.suite.get_task(i)) for i in self.chain]
         text = ", ".join(steps[:-1]) + f", then {steps[-1]}"
         return text[0].upper() + text[1:] + "."
+
+    def _instruction(self, task: Any) -> str:
+        """A task's instruction: LIBERO's, or under ``task`` and ``lan`` LIBERO-PRO's own."""
+        if self.perturbation in ("task", "lan"):
+            return " ".join(robosuite_parse_problem(str(self._bddl(task)))["language_instruction"])
+        return str(task.language)
 
     def _bddl(self, task: Any) -> Path:
         return self._files("bddl_files", task)

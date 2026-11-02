@@ -14,10 +14,13 @@ line can still be blocked, by a fixture or by the arm folding into itself near i
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from hud.environment.robot.control import Planner
 
 HOME_POS = np.array([-0.21, 0.0, 1.172])
 HOME_ROTVEC = np.array([3.141, 0.0, -0.09])
@@ -68,7 +71,7 @@ def home(obs: dict[str, Any]) -> tuple[NDArray[np.float64], None, set[str]]:
 PROGRESS, STALL_TICKS = 0.002, 10
 
 
-def reach(target: NDArray[np.float64]) -> Any:
+def reach(target: NDArray[np.float64]) -> Planner:
     """A motion planner for the fingertips to the world point *target* (m): the next delta
     action toward it along a straight line, orientation and grip held, none once it is there or
     has stopped getting closer (blocked by a fixture, an object or the arm's own reach)."""
